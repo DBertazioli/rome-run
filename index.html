@@ -1242,6 +1242,25 @@ map.on('click', e => {
   pick = false; stopWatch(); say('');
   setPos(e.latlng.lat, e.latlng.lng, 0, true, false);
 });
+// iOS Safari sends no dblclick for a touch double tap, so Leaflet's doubleClickZoom never fires there.
+// Detect it here for touch; preventDefault on the second tap stops the browser's own dblclick, so no double zoom.
+let tap1 = null, tapStart = null, multi = false;
+const mapEl = map.getContainer();
+mapEl.addEventListener('touchstart', ev => {
+  if (ev.touches.length > 1) multi = true;
+  const t = ev.touches[0]; tapStart = { x: t.clientX, y: t.clientY };
+}, { passive: true });
+mapEl.addEventListener('touchend', ev => {
+  if (ev.touches.length) return;
+  const t = ev.changedTouches[0], now = Date.now(), wasMulti = multi;
+  multi = false;
+  if (wasMulti || !tapStart || Math.hypot(t.clientX - tapStart.x, t.clientY - tapStart.y) > 10
+    || ev.target.closest('.leaflet-control, .leaflet-popup')) { tap1 = null; return; }
+  if (tap1 && now - tap1.t < 350 && Math.hypot(t.clientX - tap1.x, t.clientY - tap1.y) < 40) {
+    tap1 = null; ev.preventDefault();
+    map.setZoomAround(map.mouseEventToContainerPoint(t), map.getZoom() + 1);
+  } else tap1 = { t: now, x: t.clientX, y: t.clientY };
+}, { passive: false });
 drawMeals(); eatRender(); syncBtns();
 setInterval(eatList, 60000);
 
