@@ -778,6 +778,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
     #fmeal button { min-height: 40px; min-width: 54px; padding: 0 8px; border: 0; border-radius: 0; font-size: 13px; }
     #fmeal button.on { background: var(--accent); color: var(--accent-fg); }
   }
+  .leaflet-bar.maptype a { width: auto; min-width: 64px; padding: 0 8px; height: 36px; line-height: 36px; font-size: 12px; font-weight: 600; }
+  .leaflet-bar.maptype a.on { background: var(--accent); color: var(--accent-fg); }
 </style>
 
 <div class="app">
@@ -871,11 +873,12 @@ map.attributionControl.setPrefix(false).addAttribution('© OpenStreetMap contrib
 
 // basemap: one SVG path per class keeps the DOM small
 // Basemap drawn from OpenStreetMap data in OSM's standard colours (the artifact cannot load OSM's tile images).
-const B = BASEMAP, cv = L.canvas({ padding: 0.3 });
-const area = (rings, color) => L.polygon(rings, { renderer: cv, stroke: false, fillColor: color, fillOpacity: 1, interactive: false }).addTo(map);
+map.createPane('basemap').style.zIndex = 300; map.createPane('labels').style.zIndex = 590;
+const B = BASEMAP, cv = L.canvas({ padding: 0.3 }), cvb = L.canvas({ pane: 'basemap', padding: 0.3 });
+const area = (rings, color) => L.polygon(rings, { renderer: cvb, stroke: false, fillColor: color, fillOpacity: 1, interactive: false }).addTo(map);
 area(B.parks, '#c8facc');
 area(B.water, '#aad3df');
-L.polyline(B.river, { renderer: cv, color: '#aad3df', weight: 7, interactive: false }).addTo(map);
+L.polyline(B.river, { renderer: cvb, color: '#aad3df', weight: 7, interactive: false }).addTo(map);
 // [class, fill, casing, base width at zoom 12, min zoom]
 const ROADS = [
   ['minor', '#ffffff', '#c9c4bd', 1.2, 14], ['tertiary', '#ffffff', '#b8b3ab', 1.6, 12],
@@ -883,11 +886,11 @@ const ROADS = [
   ['trunk', '#f9b29c', '#c8705a', 2.8, 0], ['motorway', '#e892a2', '#c34e6a', 3, 0],
 ];
 const roadLayers = ROADS.map(([cls, fill, casing, w, minZoom]) => ({ minZoom, w,
-  casing: L.polyline(B.roads[cls], { renderer: cv, color: casing, interactive: false, lineCap: 'round', lineJoin: 'round' }),
-  fill: L.polyline(B.roads[cls], { renderer: cv, color: fill, interactive: false, lineCap: 'round', lineJoin: 'round' }) }));
+  casing: L.polyline(B.roads[cls], { renderer: cvb, color: casing, interactive: false, lineCap: 'round', lineJoin: 'round' }),
+  fill: L.polyline(B.roads[cls], { renderer: cvb, color: fill, interactive: false, lineCap: 'round', lineJoin: 'round' }) }));
 const METRO = { A: '#f5821f', B: '#2160ad', C: '#2a9d48' };
 const metro = Object.entries(B.metro).map(([ref, ways]) => L.polyline(ways, { renderer: cv, color: METRO[ref] || '#888', weight: 3, opacity: 0.9, interactive: false }));
-const label = (lat, lon, html, cls) => L.marker([lat, lon], { interactive: false, keyboard: false,
+const label = (lat, lon, html, cls) => L.marker([lat, lon], { pane: 'labels', interactive: false, keyboard: false,
   icon: L.divIcon({ className: '', html: `<div class="${cls}">${html}</div>`, iconSize: [0, 0] }) }).addTo(map);
 for (const [lat, lon, name] of B.stations) label(lat, lon, esc(name), 'stn');
 for (const [lat, lon, name] of B.rail) label(lat, lon, esc(name.replace(/^Roma /, '')), 'rail');
@@ -1281,6 +1284,39 @@ document.getElementById('copy').onclick = () => {
   const fallback = () => { ta.focus(); ta.select(); };
   try { navigator.clipboard.writeText(ta.value).catch(fallback); } catch (e) { fallback(); }
 };
+// real map tiles (GitHub Pages copy only): Street map = OSM tiles; Offline map = the embedded basemap
+const TKEY = 'romeFlyerMapType';
+const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
+let mapType = 'street', tileOk = 0, tileBad = 0, tileAuto = false;
+try { if (localStorage.getItem(TKEY) === 'offline') mapType = 'offline'; } catch (e) {}
+const mtBtns = {};
+function setMapType(m, save) {
+  mapType = m;
+  const street = m === 'street';
+  street ? tiles.addTo(map) : tiles.remove();
+  for (const p of ['basemap', 'labels']) map.getPane(p).style.display = street ? 'none' : '';
+  for (const k in mtBtns) mtBtns[k].classList.toggle('on', k === m);
+  if (save) { try { localStorage.setItem(TKEY, m); } catch (e) {} }
+}
+const MapTypeCtl = L.Control.extend({ options: { position: 'topleft' }, onAdd() {
+  const d = L.DomUtil.create('div', 'leaflet-bar maptype');
+  for (const [k, name] of [['street', 'Street map'], ['offline', 'Offline map']]) {
+    const a = mtBtns[k] = L.DomUtil.create('a', '', d);
+    a.href = '#'; a.textContent = name; a.setAttribute('role', 'button');
+    L.DomEvent.on(a, 'click', ev => { L.DomEvent.preventDefault(ev); setMapType(k, true); });
+  }
+  L.DomEvent.disableClickPropagation(d);
+  return d; } });
+new MapTypeCtl().addTo(map);
+tiles.on('tileload', () => { tileOk++; });
+tiles.on('tileerror', () => {
+  tileBad++;
+  if (!tileOk && tileBad >= 6 && mapType === 'street' && !tileAuto) {
+    tileAuto = true; setMapType('offline', false);
+    say('Street map tiles could not load: showing the offline map.');
+  }
+});
+setMapType(mapType, false);
 render();
 </script>
 
