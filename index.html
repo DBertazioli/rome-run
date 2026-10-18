@@ -757,6 +757,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .eatbtn { min-height: 36px; padding: 3px 12px; }
   .echip { display: flex; align-items: center; gap: 4px; min-height: 36px; }
   .leaflet-bar.locate a { width: 36px; height: 36px; line-height: 36px; font-size: 20px; }
+  .gpstoast { max-width: min(320px, calc(100vw - 32px)); background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.35; box-shadow: 0 1px 5px rgba(0,0,0,.3); }
   .leaflet-bar.locate a.on { background: var(--accent); color: var(--accent-fg); }
   .leaflet-popup-content .eatact a { display: inline-block; min-height: 36px; line-height: 34px; padding: 0 10px; margin: 6px 6px 0 0; border: 1px solid var(--line); border-radius: 6px; background: var(--chip); text-decoration: none; }
   #fmeal, #tabbar { display: none; }
@@ -1180,7 +1181,11 @@ document.querySelectorAll('#emeal button, #fmeal button').forEach(b => b.onclick
 
 // my position: GPS (may be blocked inside the viewer iframe) or set by hand
 const gpsmsg = document.getElementById('gpsmsg'), locBtn = document.getElementById('locate'), posBtn = document.getElementById('setpos');
-const say = t => { gpsmsg.textContent = t; gpsmsg.hidden = !t; };
+// GPS messages show in the Eat panel and as a banner on the map (the Eat panel is hidden on the phone Map tab)
+const GpsMsgCtl = L.Control.extend({ options: { position: 'bottomleft' }, onAdd() {
+  const d = L.DomUtil.create('div', 'gpstoast'); d.hidden = true; L.DomEvent.disableClickPropagation(d); return d; } });
+const gpsToast = new GpsMsgCtl().addTo(map).getContainer();
+const say = t => { for (const el of [gpsmsg, gpsToast]) { el.textContent = t; el.hidden = !t; } };
 const LocateCtl = L.Control.extend({ options: { position: 'topleft' }, onAdd() {
   const d = L.DomUtil.create('div', 'leaflet-bar locate'), a = L.DomUtil.create('a', '', d);
   a.href = '#'; a.title = 'Locate me'; a.textContent = '◎';
@@ -1204,16 +1209,29 @@ function setPos(lat, lon, acc, manual, pan) {
   eatList();
 }
 function stopWatch() { if (watchId !== null) { try { navigator.geolocation.clearWatch(watchId); } catch (e) {} watchId = null; } syncBtns(); }
-function gpsFail() { stopWatch(); say("GPS is not available in this viewer. Tap 'Set my position', then tap the map."); }
+const GPS_MSG = {
+  1: "Location is blocked. On iPhone: Settings > Privacy & Security > Location Services > Safari Websites > While Using the App (Precise Location on). Then in Safari tap aA > Website Settings > Location > Allow, and reload. Or use 'Set my position' in the Eat tab.",
+  2: "The phone gave no position. Check Location Services is on, or try near a window or outdoors.",
+};
+function gpsFail(err) {
+  // a timeout is not final: the watch keeps running and the next fix clears the message
+  if (err && err.code === 3) { if (!pos) say('Still looking for your position...'); return; }
+  stopWatch();
+  say(GPS_MSG[err && err.code] || "GPS is not available in this viewer. Tap 'Set my position' in the Eat tab, then tap the map.");
+}
 function toggleLocate() {
   if (watchId !== null) { stopWatch(); pos = null; meLayer.clearLayers(); say(''); eatList(); return; }
   pick = false; say('');
   if (!('geolocation' in navigator) || !navigator.geolocation) { gpsFail(); return; }
-  gpsFirst = true;
+  gpsFirst = true; say('Looking for your position...');
+  const fix = p => {
+    if (watchId === null) return;
+    say(''); setPos(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false, gpsFirst); gpsFirst = false;
+  };
   try {
-    watchId = navigator.geolocation.watchPosition(p => {
-      say(''); setPos(p.coords.latitude, p.coords.longitude, p.coords.accuracy, false, gpsFirst); gpsFirst = false;
-    }, gpsFail, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+    watchId = navigator.geolocation.watchPosition(fix, gpsFail, { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+    // quick coarse first fix (wifi/cell) while the precise GPS warms up; the watch replaces it
+    navigator.geolocation.getCurrentPosition(p => { if (gpsFirst) fix(p); }, () => {}, { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 });
   } catch (e) { watchId = null; gpsFail(); }
   syncBtns();
 }
