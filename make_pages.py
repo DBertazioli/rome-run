@@ -25,46 +25,25 @@ rep("casing: L.polyline(B.roads[cls], { renderer: cv,", "casing: L.polyline(B.ro
 rep("fill: L.polyline(B.roads[cls], { renderer: cv,", "fill: L.polyline(B.roads[cls], { renderer: cvb,")
 rep("L.marker([lat, lon], { interactive: false, keyboard: false,", "L.marker([lat, lon], { pane: 'labels', interactive: false, keyboard: false,")
 
-# 3. CSS for the switch
-rep('</style>\n\n<div class="app">',
-    "  .leaflet-bar.maptype a { width: auto; min-width: 64px; padding: 0 8px; height: 36px; line-height: 36px; font-size: 12px; font-weight: 600; }\n"
-    "  .leaflet-bar.maptype a.on { background: var(--accent); color: var(--accent-fg); }\n"
-    '</style>\n\n<div class="app">')
-
-# 4. tiles + switch + automatic fallback
-JS = r"""// real map tiles (GitHub Pages copy only): Street map = OSM tiles; Offline map = the embedded basemap
-const TKEY = 'romeFlyerMapType';
+# 4. tiles + automatic fallback (no visible switch: the user always uses the street map)
+JS = r"""// real map tiles (GitHub Pages copy only): OSM tiles; the embedded basemap shows only if the tiles cannot load
 const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
 let mapType = 'street', tileOk = 0, tileBad = 0, tileAuto = false;
-try { if (localStorage.getItem(TKEY) === 'offline') mapType = 'offline'; } catch (e) {}
-const mtBtns = {};
-function setMapType(m, save) {
+function setMapType(m) {
   mapType = m;
   const street = m === 'street';
   street ? tiles.addTo(map) : tiles.remove();
   for (const p of ['basemap', 'labels']) map.getPane(p).style.display = street ? 'none' : '';
-  for (const k in mtBtns) mtBtns[k].classList.toggle('on', k === m);
-  if (save) { try { localStorage.setItem(TKEY, m); } catch (e) {} }
 }
-const MapTypeCtl = L.Control.extend({ options: { position: 'topleft' }, onAdd() {
-  const d = L.DomUtil.create('div', 'leaflet-bar maptype');
-  for (const [k, name] of [['street', 'Street map'], ['offline', 'Offline map']]) {
-    const a = mtBtns[k] = L.DomUtil.create('a', '', d);
-    a.href = '#'; a.textContent = name; a.setAttribute('role', 'button');
-    L.DomEvent.on(a, 'click', ev => { L.DomEvent.preventDefault(ev); setMapType(k, true); });
-  }
-  L.DomEvent.disableClickPropagation(d);
-  return d; } });
-new MapTypeCtl().addTo(map);
 tiles.on('tileload', () => { tileOk++; });
 tiles.on('tileerror', () => {
   tileBad++;
   if (!tileOk && tileBad >= 6 && mapType === 'street' && !tileAuto) {
-    tileAuto = true; setMapType('offline', false);
+    tileAuto = true; setMapType('offline');
     say('Street map tiles could not load: showing the offline map.');
   }
 });
-setMapType(mapType, false);
+setMapType(mapType);
 """
 rep("};\nrender();\n</script>", "};\n" + JS + "render();\n</script>")
 open(D + 'pages/index.html', 'w', encoding='utf-8', newline='').write(t)
