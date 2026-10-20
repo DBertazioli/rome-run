@@ -866,6 +866,8 @@ const byId = Object.fromEntries(SITES.map(s => [s.id, s]));
 const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 const map = L.map('map', { zoomControl: true }).setView([41.89, 12.50], 12);
+// on touch screens a finger misses small dots: invisible 22 px tap areas sit under the visible markers
+const COARSE = matchMedia('(pointer: coarse)').matches;
 map.attributionControl.setPrefix(false).addAttribution('© OpenStreetMap contributors');
 
 // basemap: one SVG path per class keeps the DOM small
@@ -966,9 +968,11 @@ function render() {
     if (g.members.length < 2) continue;
     const c = { lat: g.members.reduce((t, s) => t + s.lat, 0) / g.members.length, lon: g.members.reduce((t, s) => t + s.lon, 0) / g.members.length };
     const r = Math.max(...g.members.map(s => dist(c, s))) + 80;
-    L.circle([c.lat, c.lon], { radius: r, className: 'grp', weight: 1, dashArray: '4 4', fillOpacity: 0.06 })
+    L.circle([c.lat, c.lon], { radius: r, className: 'grp', weight: 1, dashArray: '4 4', fillOpacity: 0.06, interactive: !COARSE })
       .bindTooltip(`${g.members.length} buildings · ${k(g.students)} students`).addTo(layer);
   }
+  if (COARSE) for (const s of vis) L.circleMarker([s.lat, s.lon], { radius: 22, stroke: false, fillOpacity: 0 })
+    .on('click', () => markers[s.id].openPopup()).addTo(layer);
   for (const s of [...vis].sort((a, b) => (b.students_est || 0) - (a.students_est || 0))) {
     const badge = s.access === 'badge';
     markers[s.id] = L.circleMarker([s.lat, s.lon], {
@@ -1145,6 +1149,9 @@ let pos = null, watchId = null, gpsFirst = true, pick = false;
 
 function eatRender() {
   eatLayer.clearLayers();
+  // restaurant tap areas go to the bottom of the university layer's SVG, so a visible university dot always wins
+  if (COARSE) for (const r of EAT) L.circleMarker([r.lat, r.lon], { radius: 22, stroke: false, fillOpacity: 0 })
+    .on('click', () => eatMarkers[r.id].openPopup()).addTo(eatLayer).bringToBack();
   for (const r of EAT) {
     const st = mealOf(r), dim = st === 'c', col = st === 'o' ? '#8a4b0f' : st === 'u' ? '#ffffff' : '#9aa5ab';
     eatMarkers[r.id] = L.circleMarker([r.lat, r.lon], { pane: 'eat', radius: 8, weight: 3, color: '#3b2a14', opacity: dim ? 0.35 : 1,
@@ -1173,7 +1180,7 @@ function focusEat(id) {
   eatMarkers[id].openPopup();
 }
 const eatBox = document.getElementById('eat');
-eatBox.onchange = () => { eatBox.checked ? eatLayer.addTo(map) : eatLayer.remove(); };
+eatBox.onchange = () => { if (eatBox.checked) { eatLayer.addTo(map); eatRender(); } else eatLayer.remove(); };
 function drawMeals() { document.querySelectorAll('#emeal button').forEach(b => b.classList.toggle('on', b.dataset.meal === E.meal)); }
 document.querySelectorAll('#emeal button').forEach(b => b.onclick = () => { E.meal = b.dataset.meal; eatSave(); drawMeals(); eatRender(); });
 
